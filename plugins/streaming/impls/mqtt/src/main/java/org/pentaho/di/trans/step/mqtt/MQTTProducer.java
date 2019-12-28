@@ -2,7 +2,7 @@
  *
  * Pentaho Data Integration
  *
- * Copyright (C) 2018 by Hitachi Vantara : http://www.pentaho.com
+ * Copyright (C) 2019 by Hitachi Vantara : http://www.pentaho.com
  *
  *******************************************************************************
  *
@@ -22,7 +22,6 @@
 
 package org.pentaho.di.trans.step.mqtt;
 
-import com.google.common.base.Charsets;
 import com.google.common.base.Supplier;
 import com.google.common.base.Suppliers;
 import org.eclipse.paho.client.mqttv3.MqttClient;
@@ -42,10 +41,12 @@ import org.pentaho.di.trans.step.StepMetaInterface;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static com.google.common.base.Preconditions.checkArgument;
+import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.util.Optional.ofNullable;
 import static org.pentaho.di.i18n.BaseMessages.getString;
 
@@ -54,6 +55,7 @@ public class MQTTProducer extends BaseStep implements StepInterface {
 
   private MQTTProducerMeta meta;
 
+  @SuppressWarnings( { "squid:S4738", "Guava" } )  //using guava memoize, so no gain switching to java Supplier
   Supplier<MqttClient> client = Suppliers.memoize( this::connectToClient );
   private AtomicBoolean connectionError = new AtomicBoolean( false );
 
@@ -85,6 +87,7 @@ public class MQTTProducer extends BaseStep implements StepInterface {
       remarks, getTransMeta(), meta.getParentStepMeta(),
       null, null, null, null, //these parameters are not used inside the method
       variables, getRepository(), getMetaStore() );
+    @SuppressWarnings( "squid:S3864" ) //peek used appropriately here
     boolean errorsPresent =
       remarks.stream().filter( result -> result.getType() == CheckResultInterface.TYPE_RESULT_ERROR )
         .peek( result -> logError( result.getText() ) )
@@ -160,10 +163,19 @@ public class MQTTProducer extends BaseStep implements StepInterface {
       throw new KettleStepException(
         getString( PKG, "MQTTProducer.Error.QOS", meta.qos ) );
     }
-    mqttMessage.setPayload( getField( row, meta.messageField )
-      .map( fas -> fas.getBytes( Charsets.UTF_8 ) )
+    //noinspection ConstantConditions
+    mqttMessage.setPayload( getFieldData( row, meta.messageField )
+      .map( this::dataAsBytes )
       .orElse( null ) ); //allow nulls to pass through
     return mqttMessage;
+  }
+
+  private byte[] dataAsBytes( Object data ) {
+    if ( getInputRowMeta().searchValueMeta( meta.messageField ).isBinary() ) {
+      return (byte[]) data;
+    } else {
+      return Objects.toString( data ).getBytes( UTF_8 );
+    }
   }
 
   /**
@@ -172,17 +184,17 @@ public class MQTTProducer extends BaseStep implements StepInterface {
   private String getTopic( Object[] row ) {
     String topic;
     if ( meta.topicInField ) {
-      topic = getField( row, meta.fieldTopic ).orElse( "" );
+      topic = getFieldData( row, meta.fieldTopic ).map( Objects::toString ).orElse( "" );
     } else {
       topic = meta.topic;
     }
     return topic;
   }
 
-  private Optional<String> getField( Object[] row, String field ) {
+  private Optional<Object> getFieldData( Object[] row, String field ) {
     int messageFieldIndex = getInputRowMeta().indexOfValue( field );
     checkArgument( messageFieldIndex > -1, getString( PKG, "MQTTProducer.Error.FieldNotFound", field ) );
-    return ofNullable( row[ messageFieldIndex ] ).map( Object::toString );
+    return ofNullable( row[ messageFieldIndex ] );
   }
 
   @Override public void stopRunning( StepMetaInterface stepMetaInterface, StepDataInterface stepDataInterface )

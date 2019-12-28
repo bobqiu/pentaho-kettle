@@ -2,7 +2,7 @@
  *
  * Pentaho Data Integration
  *
- * Copyright (C) 2002-2018 by Hitachi Vantara : http://www.pentaho.com
+ * Copyright (C) 2002-2019 by Hitachi Vantara : http://www.pentaho.com
  *
  *******************************************************************************
  *
@@ -281,7 +281,8 @@ public class PGBulkLoader extends BaseStep implements StepInterface {
     }
   }
 
-  private void writeRowToPostgres( RowMetaInterface rowMeta, Object[] r ) throws KettleException {
+  @VisibleForTesting
+  void writeRowToPostgres( RowMetaInterface rowMeta, Object[] r ) throws KettleException {
 
     try {
       // So, we have this output stream to which we can write CSV data to.
@@ -314,6 +315,7 @@ public class PGBulkLoader extends BaseStep implements StepInterface {
               pgCopyOut.write( data.quote );
               break;
             case ValueMetaInterface.TYPE_INTEGER:
+            case ValueMetaInterface.TYPE_BOOLEAN:
               if ( valueMeta.isStorageBinaryString() ) {
                 pgCopyOut.write( (byte[]) valueData );
               } else {
@@ -398,13 +400,6 @@ public class PGBulkLoader extends BaseStep implements StepInterface {
                   throw new KettleException( "PGBulkLoader doesn't know how to handle timestamp (neither passthrough, nor date or datetime for field " + valueMeta.getName() );
               }
               break;
-            case ValueMetaInterface.TYPE_BOOLEAN:
-              if ( valueMeta.isStorageBinaryString() ) {
-                pgCopyOut.write( (byte[]) valueData );
-              } else {
-                pgCopyOut.write( Double.toString( valueMeta.getNumber( valueData ) ).getBytes( clientEncoding ) );
-              }
-              break;
             case ValueMetaInterface.TYPE_NUMBER:
               if ( valueMeta.isStorageBinaryString() ) {
                 pgCopyOut.write( (byte[]) valueData );
@@ -437,6 +432,13 @@ public class PGBulkLoader extends BaseStep implements StepInterface {
 
   }
 
+  protected void verifyDatabaseConnection() throws KettleException {
+    // Confirming Database Connection is defined.
+    if ( meta.getDatabaseMeta() == null ) {
+      throw new KettleException( BaseMessages.getString( PKG, "PGBulkLoaderMeta.GetSQL.NoConnectionDefined" ) );
+    }
+  }
+
   public boolean init( StepMetaInterface smi, StepDataInterface sdi ) {
     meta = (PGBulkLoaderMeta) smi;
     data = (PGBulkLoaderData) sdi;
@@ -445,6 +447,15 @@ public class PGBulkLoader extends BaseStep implements StepInterface {
     String separator = environmentSubstitute( meta.getDelimiter() );
 
     if ( super.init( smi, sdi ) ) {
+
+      // Confirming Database Connection is defined.
+      try {
+        verifyDatabaseConnection();
+      } catch ( KettleException ex ) {
+        logError( ex.getMessage() );
+        return false;
+      }
+
       if ( enclosure != null ) {
         data.quote = enclosure.getBytes();
       } else {

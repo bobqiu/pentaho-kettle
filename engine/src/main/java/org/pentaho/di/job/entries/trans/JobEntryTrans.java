@@ -2,7 +2,7 @@
  *
  * Pentaho Data Integration
  *
- * Copyright (C) 2002-2018 by Hitachi Vantara : http://www.pentaho.com
+ * Copyright (C) 2002-2019 by Hitachi Vantara : http://www.pentaho.com
  *
  *******************************************************************************
  *
@@ -1199,16 +1199,7 @@ public class JobEntryTrans extends JobEntryBase implements Cloneable, JobEntryIn
               trans.stopAll();
               result.setNrErrors( 1 );
             }
-            Result newResult = trans.getResult();
-
-            result.clear(); // clear only the numbers, NOT the files or rows.
-            result.add( newResult );
-
-            // Set the result rows too, if any ...
-            if ( !Utils.isEmpty( newResult.getRows() ) ) {
-              result.setRows( newResult.getRows() );
-            }
-
+            updateResult( result );
             if ( setLogfile ) {
               ResultFile resultFile =
                 new ResultFile(
@@ -1260,6 +1251,15 @@ public class JobEntryTrans extends JobEntryBase implements Cloneable, JobEntryIn
     }
 
     return result;
+  }
+
+  protected void updateResult( Result result ) {
+    Result newResult = trans.getResult();
+    result.clear(); // clear only the numbers, NOT the files or rows.
+    result.add( newResult );
+    if ( !Utils.isEmpty( newResult.getRows() ) || trans.isResultRowsSet() ) {
+      result.setRows( newResult.getRows() );
+    }
   }
 
   /**
@@ -1353,7 +1353,7 @@ public class JobEntryTrans extends JobEntryBase implements Cloneable, JobEntryIn
         //  When the child parameter does exist in the parent parameters, overwrite the child parameter by the
         // parent parameter.
 
-        StepWithMappingMeta.replaceVariableValues( transMeta, space );
+        StepWithMappingMeta.replaceVariableValues( transMeta, space, "Trans" );
         if ( isPassingAllParameters() ) {
           // All other parent parameters need to get copied into the child parameters  (when the 'Inherit all
           // variables from the transformation?' option is checked)
@@ -1695,6 +1695,14 @@ public class JobEntryTrans extends JobEntryBase implements Cloneable, JobEntryIn
       // Set fieldNameParameter only if exists and if it is not declared any staticValue( parameterValues array )
       //
       String thisValue = namedParam.getParameterValue( parameters[ idx ] );
+      // multiple executions on the same jobEntryTrans variableSpace need to be updated even for nulls or blank values.
+      // so we have to ask if that same variable had a value before and if it had - and the new value is empty -
+      // we should set it as a blank value instead of ignoring it.
+      // NOTE: we should only replace it if we have a parameterFieldNames defined -> parameterFieldNames[ idx ] ) != null
+      if ( !Utils.isEmpty( jobEntryTrans.getVariable( parameters[ idx ] ) ) && Utils.isEmpty( thisValue )
+        && idx < parameterFieldNames.length && !Utils.isEmpty( Const.trim( parameterFieldNames[ idx ] ) ) ) {
+        jobEntryTrans.setVariable( parameters[ idx ], "" );
+      }
       // Set value only if is not empty at namedParam and exists in parameterFieldNames
       if ( !Utils.isEmpty( thisValue ) && idx < parameterFieldNames.length ) {
         // If exists then ask if is not empty

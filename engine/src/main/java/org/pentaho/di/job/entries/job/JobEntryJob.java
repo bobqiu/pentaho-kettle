@@ -2,7 +2,7 @@
  *
  * Pentaho Data Integration
  *
- * Copyright (C) 2002-2018 by Hitachi Vantara : http://www.pentaho.com
+ * Copyright (C) 2002-2019 by Hitachi Vantara : http://www.pentaho.com
  *
  *******************************************************************************
  *
@@ -353,6 +353,24 @@ public class JobEntryJob extends JobEntryBase implements Cloneable, JobEntryInte
     return retval.toString();
   }
 
+  private void checkObjectLocationSpecificationMethod() {
+    if ( specificationMethod == null ) {
+      // Backward compatibility
+      //
+      // Default = Filename
+      //
+      specificationMethod = ObjectLocationSpecificationMethod.FILENAME;
+
+      if ( !Utils.isEmpty( filename ) ) {
+        specificationMethod = ObjectLocationSpecificationMethod.FILENAME;
+      } else if ( jobObjectId != null ) {
+        specificationMethod = ObjectLocationSpecificationMethod.REPOSITORY_BY_REFERENCE;
+      } else if ( !Utils.isEmpty( jobname ) ) {
+        specificationMethod = ObjectLocationSpecificationMethod.REPOSITORY_BY_NAME;
+      }
+    }
+  }
+
   @Override
   public void loadXML( Node entrynode, List<DatabaseMeta> databases, List<SlaveServer> slaveServers,
     Repository rep, IMetaStore metaStore ) throws KettleXMLException {
@@ -390,7 +408,17 @@ public class JobEntryJob extends JobEntryBase implements Cloneable, JobEntryInte
         }
       } else {
         specificationMethod = ObjectLocationSpecificationMethod.FILENAME;
+        if ( Utils.isEmpty( filename ) && !Utils.isEmpty( directory ) && !Utils.isEmpty( jobname ) ) {
+          // this job was exported from a repository and is being loaded locally
+          // need to create a well formatted filename
+          filename = directory + "/" + jobname;
+          if ( !filename.toLowerCase().endsWith( ".kjb" ) ) {
+            filename = filename + ".kjb";
+          }
+        }
       }
+
+      checkObjectLocationSpecificationMethod( );
 
       argFromPrevious = "Y".equalsIgnoreCase( XMLHandler.getTagValue( entrynode, "arg_from_previous" ) );
       paramsFromPrevious = "Y".equalsIgnoreCase( XMLHandler.getTagValue( entrynode, "params_from_previous" ) );
@@ -1346,7 +1374,7 @@ public class JobEntryJob extends JobEntryBase implements Cloneable, JobEntryInte
     }
   }
 
-  private JobMeta getJobMetaFromRepository( Repository rep, CurrentDirectoryResolver r, String transPath ) throws KettleException {
+  protected JobMeta getJobMetaFromRepository( Repository rep, CurrentDirectoryResolver r, String transPath, VariableSpace tmpSpace ) throws KettleException {
     String realJobName = "";
     String realDirectory = "/";
 
@@ -1361,7 +1389,11 @@ public class JobEntryJob extends JobEntryBase implements Cloneable, JobEntryInte
     if ( repositoryDirectory == null ) {
       throw new KettleException( "Unable to find repository directory [" + Const.NVL( realDirectory, "" ) + "]" );
     }
-    return rep.loadJob( realJobName, repositoryDirectory, null, null ); // reads
+    JobMeta jobMeta = rep.loadJob( realJobName, repositoryDirectory, null, null ); //reads
+    if ( jobMeta != null ) {
+      jobMeta.initializeVariablesFrom( tmpSpace );
+    }
+    return jobMeta;
   }
 
   public JobMeta getJobMeta( Repository rep, IMetaStore metaStore, VariableSpace space ) throws KettleException {
@@ -1378,7 +1410,7 @@ public class JobEntryJob extends JobEntryBase implements Cloneable, JobEntryInte
             jobMeta = new JobMeta( tmpSpace, realFilename, rep, metaStore, null );
           } catch ( KettleException e ) {
             // try to load from repository, this job may have been developed locally and later uploaded to the repository
-            jobMeta = getJobMetaFromRepository( rep, r, realFilename );
+            jobMeta = getJobMetaFromRepository( rep, r, realFilename, tmpSpace );
           }
           break;
         case REPOSITORY_BY_NAME:
@@ -1393,7 +1425,7 @@ public class JobEntryJob extends JobEntryBase implements Cloneable, JobEntryInte
             }
             jobMeta = new JobMeta( tmpSpace, transPath, rep, metaStore, null );
           } else {
-            jobMeta = getJobMetaFromRepository( rep, r, transPath );
+            jobMeta = getJobMetaFromRepository( rep, r, transPath, tmpSpace );
           }
           break;
         case REPOSITORY_BY_REFERENCE:
